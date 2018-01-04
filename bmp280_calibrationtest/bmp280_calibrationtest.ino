@@ -32,7 +32,7 @@ Adafruit_BMP280 bmp; // I2C
 void setup() {
   while(!Serial);
   Serial.begin(9600);
-  Serial.println(F("BMP280 test"));
+  Serial.println(F("BMP280 Precision Calibration test"));
 
     pinMode(LED_BUILTIN, OUTPUT);
     
@@ -41,24 +41,19 @@ void setup() {
   if (!bmp.begin()) {  
     Serial.println(F("Could not find a valid BMP280 sensor, check wiring!"));
  
- digitalWrite(LED_BUILTIN, LOW);   // turn the LED on (HIGH is the voltage level)
+    digitalWrite(LED_BUILTIN, LOW);   // turn the LED on (HIGH is the voltage level)
     while (1);
   }
   
 }
 
 void loop() {
-    Serial.print(F("Temperature = "));
+    Serial.print(millis());
+    Serial.print(",");
     Serial.print(bmp.readTemperature());
-    Serial.println(" *C");
-    
-    Serial.print(F("Pressure = "));
+    Serial.print(",");
     Serial.print(bmp.readPressure());
-    Serial.println(" Pa");
-
-    Serial.print(F("Approx altitude = "));
+    Serial.print(",");
     Serial.print(bmp.readAltitude(1013.25)); // this should be adjusted to your local forcase
-    Serial.println(" m");
-    
     Serial.println();
 }
