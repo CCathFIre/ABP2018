@@ -144,7 +144,7 @@ void loop() {
     break;
     case APOGEE:
       velocity = CalcAccelVel(velocity);
-      if(velocity > accelFreefalThreshold)
+      if(velocity > accelFreefallThreshold)
         emergencyRescue = true;
       if(fabs(altitude - launchA) <= baroLandedThreshold){
         flightState = LANDED;
