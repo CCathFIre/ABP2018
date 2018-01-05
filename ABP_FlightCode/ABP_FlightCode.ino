@@ -153,7 +153,6 @@ void loop() {
       }
     break;
     case LANDED:
-
     break;
   }
   if(runPIDControl){
@@ -180,8 +179,10 @@ void ReadBestFlight(){
     }
     inFile.close();
   }
-  else
+  else{
+    Serial.println("Error: Unable to open comparison datafile.");
     while(1); //Freeze code if comparison dataset cannot be read
+  }
 }
 
 void UpdateBaroBuffers(){
