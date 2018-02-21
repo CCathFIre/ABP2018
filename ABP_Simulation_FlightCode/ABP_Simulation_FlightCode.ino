@@ -39,7 +39,7 @@ Servo tabServos;
 #define APOGEE 3
 #define LANDED 4
 //Other useful constants that may need to be tweaked over time
-const int chipSelect = 28; //Confirmed right number
+const int chipSelect = 28;
 const String dataFileName = "datalog.txt";
 const int dataSize = 8; //Number of data points saved to SD card each cycle
 const String inFileName = "BESTFL~1.TXT";
@@ -57,43 +57,51 @@ const float baroApogeeThreshold = 5; //m
 const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
-const float thetaMax = 90;
+const float thetaMax = 75;
 
 //Flags
 bool saveData = false;
-bool runPIDControl = false;
+bool runPIDControl = true;
 bool emergencyRescue = false;
 
 //Global variables (i.e. things that I'd like to create in void setup(), but then wouldn't apply to void loop())
-int flightState = WAITING; //Modify this to start the code at a different point
+int flightState = BURNOUT; //Modify this to start the code at a different point
 float accelX, accelY, accelZ;
 float temperature, pressure, altitude;
 float potValue;
-float lastA, lastCalcT, lastPIDT, launchT, launchA;
+float lastA, lastCalcT, lastPIDT, launchT=0, launchA=0;
 float bestAlt[preCalcSize], bestVel[preCalcSize];
-float theta, velocity = 0, maxA = 0;
+float theta=thetaMax, velocity = 0, maxA = 0;
 float integralTerm = 0, lastError = 0;
 float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 
+//Simulation variables
+float realA=-32, realV=590, realY=1350;
+int t_init = 4000, lastT; //milliseconds
+
 void setup() {
-  while (!Serial); //FOR TESTING PURPOSES ONLY!!!
   Serial.begin(9600);
+  while (!Serial); //FOR TESTING PURPOSES ONLY!!!
   
-  if(!SD.begin(chipSelect) || !accel.begin() || !bmp.begin())
+  if(!SD.begin(chipSelect)) //Merge with the other loop in final code, separate now for debugging purposes
+  {
+    Serial.println("Error: SD Card initialization failure");
+    while(1);
+  }
+  /*if(!accel.begin() || !bmp.begin())
   {
     Serial.println("Error: Sensor initialization failure");
     while(1);
-  }
+  }*/
 
   tabServos.attach(servoPin);
   
-  accel.setRange(ADXL345_RANGE_16_G);
-  altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude
-  launchA = altitude;
+  /*accel.setRange(ADXL345_RANGE_16_G);
+  altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
   ReadBestFlight();
 
-  tabServos.write(thetaMax); //Run servo startup routine
+  /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
   potValue = map(analogRead(potPin),0,1023,0,269);
   if(fabs(potValue-thetaMax) > potNoiseThreshold){
@@ -106,7 +114,10 @@ void setup() {
   if(fabs(potValue-thetaMin) > potNoiseThreshold){
     Serial.println("Error: Jammed Mechanism");
     while(1);
-  }
+  }*/
+  lastT=millis();
+  lastPIDT=millis();
+  launchT = lastT-t_init;
 }
 
 void loop() {
@@ -131,10 +142,13 @@ void loop() {
       }
     break;
     case BURNOUT:
-      velocity = CalcAccelVel(velocity);
+      velocity = realV; //CalcAccelVel(velocity);
       if(maxA > altitude + baroApogeeThreshold){
         flightState = APOGEE;
         runPIDControl = false;
+        tabServos.write(thetaMax);
+        Serial.println("Ending control phase.");
+        while(1); //ONLY FOR TESTING PURPOSES
       }
     break;
     case APOGEE:
@@ -158,9 +172,9 @@ void loop() {
     tabServos.write(theta);
   }
   if(saveData)
-    SaveSensorData();
+    //SaveSensorData();
   if(emergencyRescue)
-    tabServos.write(thetaMax);
+    tabServos.write(thetaMin);
 }
 
 void ReadBestFlight(){
@@ -240,11 +254,26 @@ float PID(float error, float lastE, float &iTerm, int deltaT){
     thetaOut = thetaMin;
   else if(thetaOut > thetaMax)
     thetaOut = thetaMax;
-  return thetaOut;
+  return thetaMax-thetaOut; //Since 75 degrees is actually full retraction, not full extension, the output had to be slightly modified
 }
 
 void GetSensorData(){
-  potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
+  float dT = (millis()-lastT)/1000;
+  lastT=millis();
+  float W_rocket=50; //pounds
+  float C_rocket=0.3, C_tab=1.3, rho_i = 0.0765, A_rocket=3.068;
+  float A_tab=0.0556*cos(theta*PI/150); //theta*90/75*PI/180
+  accelX=0;accelY=0;
+  float rho_real = rho_i*(1-0.1715*realY/5280);
+
+  realA = -32.2 - 0.5*rho_real*(C_rocket*A_rocket+C_tab*A_tab)*pow(realV, 3)/(fabs(realV)*W_rocket);
+  realV += realA*dT;
+  realY += realV*dT;
+
+  altitude=realY;
+  accelZ=realA;
+  
+  /*potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
   sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
   accelX = event.acceleration.x;
@@ -253,7 +282,7 @@ void GetSensorData(){
   temperature = bmp.readTemperature();
   pressure = bmp.readPressure();
   lastA = altitude; //Variable to track if new altitude data has come in
-  altitude = bmp.readAltitude(seaPressure)-launchA; //Shift all altitude data relative to the starting point
+  altitude = bmp.readAltitude(seaPressure)-launchA; //Shift all altitude data relative to the starting point*/
   if(altitude > maxA)
     maxA = altitude; //Also track maximum altitude
 }
