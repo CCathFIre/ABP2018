@@ -1,16 +1,16 @@
 /*
  * Notre Dame Rocket Team Air-Breaking Payload Flight Code Version 0.8
  * Currently untested, relying on data from the control code simulation
- *
+ * 
  * Author: Aidan McDonald
  * Last Update: 01/05/2018
- *
+ * 
  * To-Dos:
  * TEST LITERALLY EVERYTHING
  * Potentiometer-based servo jam monitoring
  * Tune thresholds, especially servo limits!
  * Figure out which pin is the chip select pin
- *
+ * 
  * To-Dones:
  * Core flight-tracking switch case structure
  * PID control loop- load comparison data, calculate error, output angle
@@ -25,10 +25,7 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Adafruit_BMP280.h>
 #include <SPI.h>
-#include <SdFat.h>
-SdFat SD;
-File dataLog;
-int count = 0;
+#include <SD.h>
 #include <Servo.h>
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -44,7 +41,7 @@ Servo tabServos;
 #define LANDED 4
 //Other useful constants that may need to be tweaked over time
 const int chipSelect = 28;
-const String dataFileName = "datalog_00.txt";
+const String dataFileName = "datalog.txt";
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
@@ -65,7 +62,6 @@ const float thetaMin = 0; //Degrees
 const float thetaFlush = 75;
 const float thetaMax = 75;
 const float maxStep = 10; //Degrees
-const float servoJamThreshold = 5; //Degrees, approx. two standard deviations
 
 //Flags
 bool armed = false;
@@ -89,18 +85,15 @@ float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 float realA=-32, realV=600, realY=1350;
 int t_init = 4000, lastT; //milliseconds
 
-//Data File
-
 void setup() {
   Serial.begin(9600);
   while (!Serial); //FOR TESTING PURPOSES ONLY!!!
-
+  
   if(!SD.begin(chipSelect)) //Merge with the other loop in final code, separate now for debugging purposes
   {
     Serial.println("Error: SD Card initialization failure");
     while(1);
   }
-
   /*if(!accel.begin() || !bmp.begin())
   {
     Serial.println("Error: Sensor initialization failure");
@@ -113,15 +106,12 @@ void setup() {
   tabServos.write(thetaMax);
 
   Serial.println("SD and servos initialized");
-
+  
   /*accel.setRange(ADXL345_RANGE_16_G);
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
   ReadBestFlight();
   Serial.println("Flight Data Loaded");
-  PrintHeader();
-
-  //Create the dataLog
 
   /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
@@ -140,13 +130,6 @@ void setup() {
   lastT=millis();
   lastPIDT=millis();
   launchT = lastT-t_init;
-
-  dataLog = SD.open(dataFileName, FILE_WRITE);
-  if(!dataLog) {
-    Serial.println("Error: SD Card could not open file, ensure connection and not faulty");
-    while(1);
-  }
-
 }
 
 void loop() {
@@ -189,8 +172,6 @@ void loop() {
         flightState = APOGEE;
         runPIDControl = false;
         tabServos.write(thetaMax);
-        dataLog.flush();
-        dataLog.close();
         Serial.println("Ending control phase.");
         while(1); //ONLY FOR TESTING PURPOSES
       }
@@ -213,19 +194,14 @@ void loop() {
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    runPIDControl = !Check_Jam(); //Shut down the PID control loop if the servos are jammed
-    tabServos.write(theta+20);
+    tabServos.write(theta);
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
-<<<<<<< HEAD
    if(millis()-lastSDT > sdWaitTime){
+      Serial.print("Saving data to SD card- ");
       SaveSensorData();
-=======
-    if(millis()-lastSDT > sdWaitTime){
-      Serial.println("Writing saveData");
-      SaveSensorData(dataLog);
->>>>>>> origin/master
+      Serial.println("saved data to SD card.");
       lastSDT = millis();
     }
   }
@@ -337,7 +313,7 @@ void GetSensorData(){
 
   altitude=realY;
   accelZ=realA;
-
+  
   /*potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
   sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
@@ -352,7 +328,6 @@ void GetSensorData(){
     maxA = altitude; //Also track maximum altitude
 }
 
-<<<<<<< HEAD
 void SaveSensorData(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
@@ -360,68 +335,12 @@ void SaveSensorData(){
     dataLog.print(accelX); dataLog.print(",");
     dataLog.print(accelY); dataLog.print(",");
     dataLog.print(accelZ); dataLog.print(",");
-    dataLog.print(velocity); dataLog.print(",");
     dataLog.print(temperature); dataLog.print(",");
     dataLog.print(pressure); dataLog.print(",");
     dataLog.print(altitude); dataLog.print(",");
-    dataLog.print(lastTheta); dataLog.print(",");
     dataLog.println(potValue);
-    dataLog.close();
-=======
-void SaveSensorData(File dataLog){
-
-  if(dataLog.isOpen()){
-    dataLog.println(millis());
-//    dataLog.println(accelX); dataLog.print(",");
-//    dataLog.println(accelY); dataLog.print(",");
-//    dataLog.println(accelZ); dataLog.print(",");
-//    dataLog.println(temperature); dataLog.print(",");
-//    dataLog.println(pressure); dataLog.print(",");
-//    dataLog.println(altitude); dataLog.print(",");
-//    dataLog.println(potValue);
-
-    if(count % 10 == 0){
-      Serial.println("Attempting flush");
-      dataLog.flush();
-      Serial.println("Completed Flush");
-    }
-    count++;
->>>>>>> origin/master
-  }
-  else {
-    Serial.print("Error: Unable to open "); Serial.println(dataFileName);
-    while(1);
-  }
-}
-<<<<<<< HEAD
-
-void PrintHeader(){
-  File dataLog = SD.open(dataFileName, FILE_WRITE);
-  if(dataLog){
-    dataLog.print("Time"); dataLog.print(",");
-    dataLog.print("X Accel"); dataLog.print(",");
-    dataLog.print("Y Accel"); dataLog.print(",");
-    dataLog.print("Z Accel"); dataLog.print(",");
-    dataLog.print("Vertical Velocity"); dataLog.print(",");
-    dataLog.print("Temperature"); dataLog.print(",");
-    dataLog.print("Pressure"); dataLog.print(",");
-    dataLog.print("Altitude"); dataLog.print(",");
-    dataLog.print("Intended Position"); dataLog.print(",");
-    dataLog.println("Encoder Value");
-    dataLog.close();
   }
   else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
   }
 }
-
-bool Check_Jam(){
-  float realTheta = (potValue-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
-  if(fabs(realTheta-lastTheta) > servoJamThreshold)
-    return true;
-  else
-    return false;
-}
-
-=======
->>>>>>> origin/master
