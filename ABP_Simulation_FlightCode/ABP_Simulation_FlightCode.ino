@@ -25,7 +25,8 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Adafruit_BMP280.h>
 #include <SPI.h>
-#include <SD.h>
+#include <SdFat.h>
+SdFat SD;
 #include <Servo.h>
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -33,7 +34,8 @@ Adafruit_BMP280 bmp; //I2C barometer initialization; for other versions check sa
 Servo tabServos;
 
 //Flight-staging constants, for code readability
-#define WAITING 0
+#define WAITING -1
+#define ARMED 0
 #define LAUNCHED 1
 #define BURNOUT 2
 #define APOGEE 3
@@ -41,15 +43,16 @@ Servo tabServos;
 //Other useful constants that may need to be tweaked over time
 const int chipSelect = 28;
 const String dataFileName = "datalog.txt";
-const int dataSize = 8; //Number of data points saved to SD card each cycle
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
-const int servoPin = 9;
+const int servoPin = 6;
+const int armPin = 7; //CHANGE THIS TO REAL PIN
 const int baroRegSize = 10; //Accuracy of regression varies wildly with number of points used
 const float seaPressure = 1013.25; //Update @ launch site
 const int potNoiseThreshold = 5; //Degrees
 const int maxPropDelay = 250; //Milliseconds
+const int sdWaitTime = 50;
 const float accelLiftoffThreshold = 50; //m/s^2
 const float baroLiftoffThreshold = 10; //m
 const float accelBurnoutThreshold = -10; //m/s^2
@@ -57,10 +60,13 @@ const float baroApogeeThreshold = 5; //m
 const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
-const float thetaMax = 75;
+const float thetaFlush = 75;
+const float thetaMax = 80;
+const float maxStep = 15; //Degrees
 
 //Flags
-bool saveData = false;
+bool armed = false;
+bool saveData = true;
 bool runPIDControl = true;
 bool emergencyRescue = false;
 
@@ -70,13 +76,14 @@ float accelX, accelY, accelZ;
 float temperature, pressure, altitude;
 float potValue;
 float lastA, lastCalcT, lastPIDT, launchT=0, launchA=0;
+int lastSDT=0;
 float bestAlt[preCalcSize], bestVel[preCalcSize];
-float theta=thetaMax, velocity = 0, maxA = 0;
+float theta=thetaMax, velocity = 0, maxA = 0, lastTheta=theta;
 float integralTerm = 0, lastError = 0;
 float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 
 //Simulation variables
-float realA=-32, realV=590, realY=1350;
+float realA=-32, realV=600, realY=1350;
 int t_init = 4000, lastT; //milliseconds
 
 void setup() {
@@ -94,12 +101,18 @@ void setup() {
     while(1);
   }*/
 
+  pinMode(armPin, INPUT);
+
   tabServos.attach(servoPin);
+  tabServos.write(thetaMax);
+
+  Serial.println("SD and servos initialized");
   
   /*accel.setRange(ADXL345_RANGE_16_G);
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
   ReadBestFlight();
+  Serial.println("Flight Data Loaded");
 
   /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
@@ -121,14 +134,27 @@ void setup() {
 }
 
 void loop() {
+  delay(10);
   GetSensorData();
   switch(flightState){
     case WAITING:
+      if(digitalRead(armPin)){
+        flightState = ARMED;
+        tabServos.write(thetaMin);
+        delay(1000);
+        tabServos.write(thetaMax);
+      }
+    break;
+    case ARMED:
       UpdateBaroBuffers();
       if(accelZ > accelLiftoffThreshold ||  (altitude-launchA) > baroLiftoffThreshold){
         flightState = LAUNCHED;
         launchT = millis();
         saveData = true;
+      }
+      if(digitalRead(armPin)){
+        flightState = WAITING;
+        tabServos.write(thetaFlush);
       }
     break;
     case LAUNCHED:
@@ -170,9 +196,14 @@ void loop() {
     lastError = error;
     lastPIDT = millis();
     tabServos.write(theta);
+    Serial.print("Set servo angle: "); Serial.println(theta);
   }
-  if(saveData)
-    //SaveSensorData();
+  if(saveData){
+    if(millis()-lastSDT > sdWaitTime){
+      SaveSensorData();
+      lastSDT = millis();
+    }
+  }
   if(emergencyRescue)
     tabServos.write(thetaMin);
 }
@@ -250,25 +281,34 @@ float PID(float error, float lastE, float &iTerm, int deltaT){
   float dTerm = (error - lastE)*cD/dT;
 
   float thetaOut = pTerm + iTerm + dTerm; //calculate intended output angle
+  thetaOut = thetaMax-thetaOut; //0 is full extension, MAX is full retraction
   if(thetaOut < thetaMin)
     thetaOut = thetaMin;
   else if(thetaOut > thetaMax)
     thetaOut = thetaMax;
-  return thetaMax-thetaOut; //Since 75 degrees is actually full retraction, not full extension, the output had to be slightly modified
+  if(thetaOut > lastTheta + maxStep)
+    thetaOut = lastTheta + maxStep;
+  if(thetaOut < lastTheta - maxStep)
+    thetaOut = lastTheta - maxStep;
+  lastTheta=thetaOut;
+  return thetaOut; //Since 75 degrees is actually full retraction, not full extension, the output had to be slightly modified
 }
 
 void GetSensorData(){
-  float dT = (millis()-lastT)/1000;
-  lastT=millis();
+  float dT = 0.01;
+  //lastT=millis();
   float W_rocket=50; //pounds
-  float C_rocket=0.3, C_tab=1.3, rho_i = 0.0765, A_rocket=3.068;
-  float A_tab=0.0556*cos(theta*PI/150); //theta*90/75*PI/180
+  float C_rocket=0.3, C_tab=1.3, rho_i = 0.0765, A_rocket=0.3068;
+  float A_tab=0.0556*cos(theta*PI/(2*thetaMax)); //theta*90/75*PI/180
   accelX=0;accelY=0;
   float rho_real = rho_i*(1-0.1715*realY/5280);
 
   realA = -32.2 - 0.5*rho_real*(C_rocket*A_rocket+C_tab*A_tab)*pow(realV, 3)/(fabs(realV)*W_rocket);
   realV += realA*dT;
   realY += realV*dT;
+  Serial.print("Time: "); Serial.print(millis()); Serial.print(" Altitude: "); Serial.print(realY);
+  Serial.print(" Velocity: "); Serial.print(realV); Serial.print(" Acceleration: "); Serial.println(realA);
+
 
   altitude=realY;
   accelZ=realA;
@@ -290,24 +330,17 @@ void GetSensorData(){
 void SaveSensorData(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
-    float dataBuff[dataSize];
-    String dataString;
-    dataBuff[0] = millis();
-    dataBuff[1] = accelX;
-    dataBuff[2] = accelY;
-    dataBuff[3] = accelZ;
-    dataBuff[4] = temperature;
-    dataBuff[5] = pressure;
-    dataBuff[6] = altitude;
-    dataBuff[7] = potValue;
-    for(int c = 0; c<dataSize; c++){
-      dataString += String(dataBuff[c]);
-      dataString += ",";
-    }
-    dataLog.println(dataString);
-    dataLog.close();
+    dataLog.print(millis()); dataLog.print(",");
+    dataLog.print(accelX); dataLog.print(",");
+    dataLog.print(accelY); dataLog.print(",");
+    dataLog.print(accelZ); dataLog.print(",");
+    dataLog.print(temperature); dataLog.print(",");
+    dataLog.print(pressure); dataLog.print(",");
+    dataLog.print(altitude); dataLog.print(",");
+    dataLog.println(potValue);
   }
-  else
+  else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+  }
 }
 

@@ -278,7 +278,8 @@ void SaveSensorData(){
     dataLog.println(dataString);
     dataLog.close();
   }
-  else
+  else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+  }
 }
 
