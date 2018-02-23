@@ -1,16 +1,16 @@
 /*
  * Notre Dame Rocket Team Air-Breaking Payload Flight Code Version 0.8
  * Currently untested, relying on data from the control code simulation
- * 
+ *
  * Author: Aidan McDonald
  * Last Update: 01/05/2018
- * 
+ *
  * To-Dos:
  * TEST LITERALLY EVERYTHING
  * Potentiometer-based servo jam monitoring
  * Tune thresholds, especially servo limits!
  * Figure out which pin is the chip select pin
- * 
+ *
  * To-Dones:
  * Core flight-tracking switch case structure
  * PID control loop- load comparison data, calculate error, output angle
@@ -54,7 +54,7 @@ const int baroRegSize = 10; //Accuracy of regression varies wildly with number o
 const float seaPressure = 1013.25; //Update @ launch site
 const int potNoiseThreshold = 5; //Degrees
 const int maxPropDelay = 250; //Milliseconds
-const int sdWaitTime = 50;
+const int sdWaitTime = 100;
 const float accelLiftoffThreshold = 50; //m/s^2
 const float baroLiftoffThreshold = 10; //m
 const float accelBurnoutThreshold = -10; //m/s^2
@@ -63,8 +63,8 @@ const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
 const float thetaFlush = 75;
-const float thetaMax = 80;
-const float maxStep = 15; //Degrees
+const float thetaMax = 75;
+const float maxStep = 10; //Degrees
 
 //Flags
 bool armed = false;
@@ -93,7 +93,7 @@ int t_init = 4000, lastT; //milliseconds
 void setup() {
   Serial.begin(9600);
   while (!Serial); //FOR TESTING PURPOSES ONLY!!!
-  
+
   if(!SD.begin(chipSelect)) //Merge with the other loop in final code, separate now for debugging purposes
   {
     Serial.println("Error: SD Card initialization failure");
@@ -112,7 +112,7 @@ void setup() {
   tabServos.write(thetaMax);
 
   Serial.println("SD and servos initialized");
-  
+
   /*accel.setRange(ADXL345_RANGE_16_G);
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
@@ -144,11 +144,11 @@ void setup() {
     Serial.println("Error: SD Card could not open file, ensure connection and not faulty");
     while(1);
   }
-  
+
 }
 
 void loop() {
-  delay(10);
+  delay(12);
   GetSensorData();
   switch(flightState){
     case WAITING:
@@ -329,7 +329,7 @@ void GetSensorData(){
 
   altitude=realY;
   accelZ=realA;
-  
+
   /*potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
   sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
@@ -345,7 +345,7 @@ void GetSensorData(){
 }
 
 void SaveSensorData(File dataLog){
-  
+
   if(dataLog.isOpen()){
     dataLog.println(millis());
 //    dataLog.println(accelX); dataLog.print(",");
@@ -368,5 +368,3 @@ void SaveSensorData(File dataLog){
     while(1);
   }
 }
-
-
