@@ -1,16 +1,16 @@
 /*
  * Notre Dame Rocket Team Air-Breaking Payload Flight Code Version 0.8
  * Currently untested, relying on data from the control code simulation
- * 
+ *
  * Author: Aidan McDonald
  * Last Update: 01/05/2018
- * 
+ *
  * To-Dos:
  * TEST LITERALLY EVERYTHING
  * Potentiometer-based servo jam monitoring
  * Tune thresholds, especially servo limits!
  * Figure out which pin is the chip select pin
- * 
+ *
  * To-Dones:
  * Core flight-tracking switch case structure
  * PID control loop- load comparison data, calculate error, output angle
@@ -25,7 +25,10 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Adafruit_BMP280.h>
 #include <SPI.h>
-#include <SD.h>
+#include <SdFat.h>
+SdFat SD;
+File dataLog;
+int count = 0;
 #include <Servo.h>
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -41,7 +44,7 @@ Servo tabServos;
 #define LANDED 4
 //Other useful constants that may need to be tweaked over time
 const int chipSelect = 28;
-const String dataFileName = "datalog.txt";
+const String dataFileName = "datalog_00.txt";
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
@@ -86,15 +89,18 @@ float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 float realA=-32, realV=600, realY=1350;
 int t_init = 4000, lastT; //milliseconds
 
+//Data File
+
 void setup() {
   Serial.begin(9600);
   while (!Serial); //FOR TESTING PURPOSES ONLY!!!
-  
+
   if(!SD.begin(chipSelect)) //Merge with the other loop in final code, separate now for debugging purposes
   {
     Serial.println("Error: SD Card initialization failure");
     while(1);
   }
+
   /*if(!accel.begin() || !bmp.begin())
   {
     Serial.println("Error: Sensor initialization failure");
@@ -107,13 +113,15 @@ void setup() {
   tabServos.write(thetaMax);
 
   Serial.println("SD and servos initialized");
-  
+
   /*accel.setRange(ADXL345_RANGE_16_G);
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
   ReadBestFlight();
   Serial.println("Flight Data Loaded");
   PrintHeader();
+
+  //Create the dataLog
 
   /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
@@ -132,6 +140,13 @@ void setup() {
   lastT=millis();
   lastPIDT=millis();
   launchT = lastT-t_init;
+
+  dataLog = SD.open(dataFileName, FILE_WRITE);
+  if(!dataLog) {
+    Serial.println("Error: SD Card could not open file, ensure connection and not faulty");
+    while(1);
+  }
+
 }
 
 void loop() {
@@ -174,6 +189,8 @@ void loop() {
         flightState = APOGEE;
         runPIDControl = false;
         tabServos.write(thetaMax);
+        dataLog.flush();
+        dataLog.close();
         Serial.println("Ending control phase.");
         while(1); //ONLY FOR TESTING PURPOSES
       }
@@ -201,8 +218,14 @@ void loop() {
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
+<<<<<<< HEAD
    if(millis()-lastSDT > sdWaitTime){
       SaveSensorData();
+=======
+    if(millis()-lastSDT > sdWaitTime){
+      Serial.println("Writing saveData");
+      SaveSensorData(dataLog);
+>>>>>>> origin/master
       lastSDT = millis();
     }
   }
@@ -314,7 +337,7 @@ void GetSensorData(){
 
   altitude=realY;
   accelZ=realA;
-  
+
   /*potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
   sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
@@ -329,6 +352,7 @@ void GetSensorData(){
     maxA = altitude; //Also track maximum altitude
 }
 
+<<<<<<< HEAD
 void SaveSensorData(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
@@ -343,11 +367,33 @@ void SaveSensorData(){
     dataLog.print(lastTheta); dataLog.print(",");
     dataLog.println(potValue);
     dataLog.close();
+=======
+void SaveSensorData(File dataLog){
+
+  if(dataLog.isOpen()){
+    dataLog.println(millis());
+//    dataLog.println(accelX); dataLog.print(",");
+//    dataLog.println(accelY); dataLog.print(",");
+//    dataLog.println(accelZ); dataLog.print(",");
+//    dataLog.println(temperature); dataLog.print(",");
+//    dataLog.println(pressure); dataLog.print(",");
+//    dataLog.println(altitude); dataLog.print(",");
+//    dataLog.println(potValue);
+
+    if(count % 10 == 0){
+      Serial.println("Attempting flush");
+      dataLog.flush();
+      Serial.println("Completed Flush");
+    }
+    count++;
+>>>>>>> origin/master
   }
   else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+    while(1);
   }
 }
+<<<<<<< HEAD
 
 void PrintHeader(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
@@ -377,3 +423,5 @@ bool Check_Jam(){
     return false;
 }
 
+=======
+>>>>>>> origin/master
