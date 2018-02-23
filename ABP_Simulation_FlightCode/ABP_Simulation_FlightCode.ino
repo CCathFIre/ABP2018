@@ -25,8 +25,7 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Adafruit_BMP280.h>
 #include <SPI.h>
-#include <SdFat.h>
-SdFat SD;
+#include <SD.h>
 #include <Servo.h>
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -52,7 +51,7 @@ const int baroRegSize = 10; //Accuracy of regression varies wildly with number o
 const float seaPressure = 1013.25; //Update @ launch site
 const int potNoiseThreshold = 5; //Degrees
 const int maxPropDelay = 250; //Milliseconds
-const int sdWaitTime = 50;
+const int sdWaitTime = 100;
 const float accelLiftoffThreshold = 50; //m/s^2
 const float baroLiftoffThreshold = 10; //m
 const float accelBurnoutThreshold = -10; //m/s^2
@@ -61,8 +60,8 @@ const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
 const float thetaFlush = 75;
-const float thetaMax = 80;
-const float maxStep = 15; //Degrees
+const float thetaMax = 75;
+const float maxStep = 10; //Degrees
 
 //Flags
 bool armed = false;
@@ -134,7 +133,7 @@ void setup() {
 }
 
 void loop() {
-  delay(10);
+  delay(12);
   GetSensorData();
   switch(flightState){
     case WAITING:
@@ -199,8 +198,10 @@ void loop() {
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
-    if(millis()-lastSDT > sdWaitTime){
+   if(millis()-lastSDT > sdWaitTime){
+      Serial.print("Saving data to SD card- ");
       SaveSensorData();
+      Serial.println("saved data to SD card.");
       lastSDT = millis();
     }
   }
