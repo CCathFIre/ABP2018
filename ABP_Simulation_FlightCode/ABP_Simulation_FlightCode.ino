@@ -43,7 +43,7 @@ Servo tabServos;
 const int chipSelect = 28;
 const String dataFileName = "datalog.txt";
 const String inFileName = "BESTFL~1.TXT";
-const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
+const int preCalcSize = 1887; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
 const int servoPin = 6;
 const int armPin = 7; //CHANGE THIS TO REAL PIN
@@ -62,6 +62,7 @@ const float thetaMin = 0; //Degrees
 const float thetaFlush = 75;
 const float thetaMax = 75;
 const float maxStep = 10; //Degrees
+const float servoJamThreshold = 5; //Degrees, approx. two standard deviations
 
 //Flags
 bool armed = false;
@@ -111,6 +112,7 @@ void setup() {
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude */
 
   ReadBestFlight();
+  PrintHeader();
   Serial.println("Flight Data Loaded");
 
   /*tabServos.write(thetaMax); //Run servo startup routine
@@ -191,10 +193,12 @@ void loop() {
   }
   if(runPIDControl){
     float error = CalcError(altitude, velocity, (int)(millis()-launchT)/10);
+    Serial.print("Error: "); Serial.println(error);
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    tabServos.write(theta);
+    tabServos.write(theta+20);
+    //runPIDControl = !CheckJam(); //Fix this before using!!!!
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
@@ -213,7 +217,7 @@ void ReadBestFlight(){
   File inFile = SD.open(inFileName);
   int c = 0; //Counter variable
   if(inFile){
-    while(inFile.available()){
+    while(inFile.available() && c<preCalcSize){
       bestVel[c] = inFile.parseFloat();
       bestAlt[c] = inFile.parseFloat();
       c++;
@@ -255,23 +259,35 @@ float CalcAccelVel(float lastVel){
 
 float CalcError(float realAlt, float realVel, int startT){
   bool match = false;
+
+  if(startT > preCalcSize-1)
+    startT = preCalcSize-1;
+  
   int c = startT; //To optimize search time, start at the current time point
+  int last_c = c;
 
   while(!match){ //Find closest altitude in buffer to current altitude
     float test = fabs(realAlt - bestAlt[c]); //Calculate delta-Y at, above, and below current test value
     float above = fabs(realAlt - bestAlt[c+1]);
     float below = fabs(realAlt - bestAlt[c-1]);
+    last_c = c;
     if(test <= above && test <= below) //If current point has least error, we have a match
       match = true;
-    else if (above < test) //Otherwise, go up or down accordingly
+    else if(above < test) //Otherwise, go up or down accordingly
       c++;
-    else if (below < test)
+    else if(below < test)
       c -= 1;
+
+    if(last_c == c)
+      match = true;
   }
+  //Serial.print("Matching altitude: "); Serial.print(bestAlt[c]); Serial.print(", Matching Velocity: "); Serial.println(bestVel[c]);
+  //Serial.print("Final index: "); Serial.println(c);
   return (realVel - bestVel[c]); //Return difference in velocities at the given altitude point
 }
 
 float PID(float error, float lastE, float &iTerm, int deltaT){
+  //Serial.print("Delta T: "); Serial.println(deltaT);
   static float cP = 80; //P constant
   static float cI = 0; //I constant
   static float cD = 4; //D constant
@@ -331,16 +347,45 @@ void GetSensorData(){
 void SaveSensorData(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
-    dataLog.print(millis()); dataLog.print(",");
-    dataLog.print(accelX); dataLog.print(",");
-    dataLog.print(accelY); dataLog.print(",");
-    dataLog.print(accelZ); dataLog.print(",");
-    dataLog.print(temperature); dataLog.print(",");
-    dataLog.print(pressure); dataLog.print(",");
-    dataLog.print(altitude); dataLog.print(",");
-    dataLog.println(potValue);
+    dataLog.print(millis()); dataLog.print(","); dataLog.flush();
+    dataLog.print(accelX); dataLog.print(","); dataLog.flush();
+    dataLog.print(accelY); dataLog.print(","); dataLog.flush();
+    dataLog.print(accelZ); dataLog.print(","); dataLog.flush();
+    dataLog.print(temperature); dataLog.print(","); dataLog.flush();
+    dataLog.print(pressure); dataLog.print(","); dataLog.flush();
+    dataLog.print(altitude); dataLog.print(","); dataLog.flush();
+    dataLog.println(potValue); dataLog.flush();
+    dataLog.close();
   }
   else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
   }
+}
+
+void PrintHeader(){
+  File dataLog = SD.open(dataFileName, FILE_WRITE);
+  if(dataLog){
+    dataLog.print("Time"); dataLog.print(","); dataLog.flush();
+    dataLog.print("X Accel"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Y Accel"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Z Accel"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Vertical Velocity"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Temperature"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Pressure"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Altitude"); dataLog.print(","); dataLog.flush();
+    dataLog.print("Intended Position"); dataLog.print(","); dataLog.flush();
+    dataLog.println("Encoder Value"); dataLog.flush();
+    dataLog.close();
+  }
+  else {
+    Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+  }
+}
+
+bool Check_Jam(){
+  float realTheta = (potValue-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  if(fabs(realTheta-lastTheta) > servoJamThreshold)
+    return true;
+  else
+    return false;
 }

@@ -28,8 +28,8 @@ void print_pos(int pos) {
 }
 
 void loop() {
-  //myservo.write(0);
-  //while(1);
+  myservo.write(90);
+  while(1);
   
   for (pos = retraction; pos <= extension; pos += 5) { // goes from 0 degrees to 180 degrees
     // in steps of 1 degree
@@ -57,7 +57,7 @@ void loop() {
 
 bool Check_Jam(){
   float realTheta = ((float)rotation-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
-  if(fabs(realTheta-pos) > servoJamThreshold)
+  if(fabs(realTheta-pos-20) > servoJamThreshold)
     return true;
   else
     return false;
