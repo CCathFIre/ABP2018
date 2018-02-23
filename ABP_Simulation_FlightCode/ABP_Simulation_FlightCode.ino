@@ -27,6 +27,8 @@
 #include <SPI.h>
 #include <SdFat.h>
 SdFat SD;
+File dataLog;
+int count = 0;
 #include <Servo.h>
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -42,7 +44,7 @@ Servo tabServos;
 #define LANDED 4
 //Other useful constants that may need to be tweaked over time
 const int chipSelect = 28;
-const String dataFileName = "datalog.txt";
+const String dataFileName = "datalog_00.txt";
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
@@ -86,6 +88,8 @@ float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 float realA=-32, realV=600, realY=1350;
 int t_init = 4000, lastT; //milliseconds
 
+//Data File
+
 void setup() {
   Serial.begin(9600);
   while (!Serial); //FOR TESTING PURPOSES ONLY!!!
@@ -95,6 +99,7 @@ void setup() {
     Serial.println("Error: SD Card initialization failure");
     while(1);
   }
+
   /*if(!accel.begin() || !bmp.begin())
   {
     Serial.println("Error: Sensor initialization failure");
@@ -114,6 +119,8 @@ void setup() {
   ReadBestFlight();
   Serial.println("Flight Data Loaded");
 
+  //Create the dataLog
+
   /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
   potValue = map(analogRead(potPin),0,1023,0,269);
@@ -131,6 +138,13 @@ void setup() {
   lastT=millis();
   lastPIDT=millis();
   launchT = lastT-t_init;
+
+  dataLog = SD.open(dataFileName, FILE_WRITE);
+  if(!dataLog) {
+    Serial.println("Error: SD Card could not open file, ensure connection and not faulty");
+    while(1);
+  }
+  
 }
 
 void loop() {
@@ -173,6 +187,8 @@ void loop() {
         flightState = APOGEE;
         runPIDControl = false;
         tabServos.write(thetaMax);
+        dataLog.flush();
+        dataLog.close();
         Serial.println("Ending control phase.");
         while(1); //ONLY FOR TESTING PURPOSES
       }
@@ -200,7 +216,8 @@ void loop() {
   }
   if(saveData){
     if(millis()-lastSDT > sdWaitTime){
-      SaveSensorData();
+      Serial.println("Writing saveData");
+      SaveSensorData(dataLog);
       lastSDT = millis();
     }
   }
@@ -327,20 +344,29 @@ void GetSensorData(){
     maxA = altitude; //Also track maximum altitude
 }
 
-void SaveSensorData(){
-  File dataLog = SD.open(dataFileName, FILE_WRITE);
-  if(dataLog){
-    dataLog.print(millis()); dataLog.print(",");
-    dataLog.print(accelX); dataLog.print(",");
-    dataLog.print(accelY); dataLog.print(",");
-    dataLog.print(accelZ); dataLog.print(",");
-    dataLog.print(temperature); dataLog.print(",");
-    dataLog.print(pressure); dataLog.print(",");
-    dataLog.print(altitude); dataLog.print(",");
-    dataLog.println(potValue);
+void SaveSensorData(File dataLog){
+  
+  if(dataLog.isOpen()){
+    dataLog.println(millis());
+//    dataLog.println(accelX); dataLog.print(",");
+//    dataLog.println(accelY); dataLog.print(",");
+//    dataLog.println(accelZ); dataLog.print(",");
+//    dataLog.println(temperature); dataLog.print(",");
+//    dataLog.println(pressure); dataLog.print(",");
+//    dataLog.println(altitude); dataLog.print(",");
+//    dataLog.println(potValue);
+
+    if(count % 10 == 0){
+      Serial.println("Attempting flush");
+      dataLog.flush();
+      Serial.println("Completed Flush");
+    }
+    count++;
   }
   else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+    while(1);
   }
 }
+
 
