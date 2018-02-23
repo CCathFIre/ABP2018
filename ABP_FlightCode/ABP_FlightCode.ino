@@ -33,7 +33,8 @@ Adafruit_BMP280 bmp; //I2C barometer initialization; for other versions check sa
 Servo tabServos;
 
 //Flight-staging constants, for code readability
-#define WAITING 0
+#define WAITING -1
+#define ARMED 0
 #define LAUNCHED 1
 #define BURNOUT 2
 #define APOGEE 3
@@ -45,11 +46,13 @@ const int dataSize = 8; //Number of data points saved to SD card each cycle
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 2350; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
-const int servoPin = 9;
+const int servoPin = 6;
+const int armPin = 7; //CHANGE THIS TO REAL PIN
 const int baroRegSize = 10; //Accuracy of regression varies wildly with number of points used
 const float seaPressure = 1013.25; //Update @ launch site
 const int potNoiseThreshold = 5; //Degrees
 const int maxPropDelay = 250; //Milliseconds
+const int sdWaitTime = 100;
 const float accelLiftoffThreshold = 50; //m/s^2
 const float baroLiftoffThreshold = 10; //m
 const float accelBurnoutThreshold = -10; //m/s^2
@@ -57,9 +60,14 @@ const float baroApogeeThreshold = 5; //m
 const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
-const float thetaMax = 90;
+const float thetaFlush = 65;
+const float thetaMax = 70;
+const float maxStep = 10; //Degrees
+const float servoJamThreshold = 5; //Degrees, approx. two standard deviations
+
 
 //Flags
+bool armed = false;
 bool saveData = false;
 bool runPIDControl = false;
 bool emergencyRescue = false;
@@ -70,8 +78,9 @@ float accelX, accelY, accelZ;
 float temperature, pressure, altitude;
 float potValue;
 float lastA, lastCalcT, lastPIDT, launchT, launchA;
+int lastSDT=0;
 float bestAlt[preCalcSize], bestVel[preCalcSize];
-float theta, velocity = 0, maxA = 0;
+float theta, velocity = 0, maxA = 0, lastTheta=theta;
 float integralTerm = 0, lastError = 0;
 float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
 
@@ -84,6 +93,8 @@ void setup() {
     Serial.println("Error: Sensor initialization failure");
     while(1);
   }
+  
+  pinMode(armPin, INPUT);
 
   tabServos.attach(servoPin);
   
@@ -92,32 +103,30 @@ void setup() {
   launchA = altitude;
 
   ReadBestFlight();
-
-  tabServos.write(thetaMax); //Run servo startup routine
-  delay(maxPropDelay*2);
-  potValue = map(analogRead(potPin),0,1023,0,269);
-  if(fabs(potValue-thetaMax) > potNoiseThreshold){
-    Serial.println("Error: Jammed Mechanism");
-    while(1);
-  }
-  delay(1000);
-  tabServos.write(thetaMin);
-  delay(maxPropDelay*2);
-  if(fabs(potValue-thetaMin) > potNoiseThreshold){
-    Serial.println("Error: Jammed Mechanism");
-    while(1);
-  }
+  PrintHeader();
 }
 
 void loop() {
   GetSensorData();
   switch(flightState){
-    case WAITING:
+     case WAITING:
+      if(digitalRead(armPin)){
+        flightState = ARMED;
+        tabServos.write(thetaMin);
+        delay(1000);
+        tabServos.write(thetaMax);
+      }
+    break;
+    case ARMED:
       UpdateBaroBuffers();
       if(accelZ > accelLiftoffThreshold ||  (altitude-launchA) > baroLiftoffThreshold){
         flightState = LAUNCHED;
         launchT = millis();
         saveData = true;
+      }
+      if(digitalRead(armPin)){
+        flightState = WAITING;
+        tabServos.write(thetaFlush);
       }
     break;
     case LAUNCHED:
@@ -155,12 +164,16 @@ void loop() {
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    tabServos.write(theta);
+    runPIDControl = !Check_Jam(); //Shut down the PID control loop if the servos are jammed
+    tabServos.write(theta+20);
   }
   if(saveData)
-    SaveSensorData();
+    if(millis()-lastSDT > sdWaitTime){
+      SaveSensorData();
+      lastSDT = millis();
+    }
   if(emergencyRescue)
-    tabServos.write(thetaMax);
+    tabServos.write(thetaMin);
 }
 
 void ReadBestFlight(){
@@ -236,10 +249,16 @@ float PID(float error, float lastE, float &iTerm, int deltaT){
   float dTerm = (error - lastE)*cD/dT;
 
   float thetaOut = pTerm + iTerm + dTerm; //calculate intended output angle
+  thetaOut = thetaMax-thetaOut; //0 is full extension, MAX is full retraction
   if(thetaOut < thetaMin)
     thetaOut = thetaMin;
   else if(thetaOut > thetaMax)
     thetaOut = thetaMax;
+  if(thetaOut > lastTheta + maxStep)
+    thetaOut = lastTheta + maxStep;
+  if(thetaOut < lastTheta - maxStep)
+    thetaOut = lastTheta - maxStep;
+  lastTheta=thetaOut;
   return thetaOut;
 }
 
@@ -261,21 +280,16 @@ void GetSensorData(){
 void SaveSensorData(){
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
-    float dataBuff[dataSize];
-    String dataString;
-    dataBuff[0] = millis();
-    dataBuff[1] = accelX;
-    dataBuff[2] = accelY;
-    dataBuff[3] = accelZ;
-    dataBuff[4] = temperature;
-    dataBuff[5] = pressure;
-    dataBuff[6] = altitude;
-    dataBuff[7] = potValue;
-    for(int c = 0; c<dataSize; c++){
-      dataString += String(dataBuff[c]);
-      dataString += ",";
-    }
-    dataLog.println(dataString);
+    dataLog.print(millis()); dataLog.print(",");
+    dataLog.print(accelX); dataLog.print(",");
+    dataLog.print(accelY); dataLog.print(",");
+    dataLog.print(accelZ); dataLog.print(",");
+    dataLog.print(velocity); dataLog.print(",");
+    dataLog.print(temperature); dataLog.print(",");
+    dataLog.print(pressure); dataLog.print(",");
+    dataLog.print(altitude); dataLog.print(",");
+    dataLog.print(lastTheta); dataLog.print(",");
+    dataLog.println(potValue);
     dataLog.close();
   }
   else {
@@ -283,3 +297,30 @@ void SaveSensorData(){
   }
 }
 
+void PrintHeader(){
+  File dataLog = SD.open(dataFileName, FILE_WRITE);
+  if(dataLog){
+    dataLog.print("Time"); dataLog.print(",");
+    dataLog.print("X Accel"); dataLog.print(",");
+    dataLog.print("Y Accel"); dataLog.print(",");
+    dataLog.print("Z Accel"); dataLog.print(",");
+    dataLog.print("Vertical Velocity"); dataLog.print(",");
+    dataLog.print("Temperature"); dataLog.print(",");
+    dataLog.print("Pressure"); dataLog.print(",");
+    dataLog.print("Altitude"); dataLog.print(",");
+    dataLog.print("Intended Position"); dataLog.print(",");
+    dataLog.println("Encoder Value");
+    dataLog.close();
+  }
+  else {
+    Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+  }
+}
+
+bool Check_Jam(){
+  float realTheta = (potValue-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  if(fabs(realTheta-lastTheta) > servoJamThreshold)
+    return true;
+  else
+    return false;
+}

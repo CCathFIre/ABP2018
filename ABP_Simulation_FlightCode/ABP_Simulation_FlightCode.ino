@@ -62,6 +62,7 @@ const float thetaMin = 0; //Degrees
 const float thetaFlush = 75;
 const float thetaMax = 75;
 const float maxStep = 10; //Degrees
+const float servoJamThreshold = 5; //Degrees, approx. two standard deviations
 
 //Flags
 bool armed = false;
@@ -112,6 +113,7 @@ void setup() {
 
   ReadBestFlight();
   Serial.println("Flight Data Loaded");
+  PrintHeader();
 
   /*tabServos.write(thetaMax); //Run servo startup routine
   delay(maxPropDelay*2);
@@ -194,14 +196,13 @@ void loop() {
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    tabServos.write(theta);
+    runPIDControl = !Check_Jam(); //Shut down the PID control loop if the servos are jammed
+    tabServos.write(theta+20);
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
    if(millis()-lastSDT > sdWaitTime){
-      Serial.print("Saving data to SD card- ");
       SaveSensorData();
-      Serial.println("saved data to SD card.");
       lastSDT = millis();
     }
   }
@@ -335,13 +336,44 @@ void SaveSensorData(){
     dataLog.print(accelX); dataLog.print(",");
     dataLog.print(accelY); dataLog.print(",");
     dataLog.print(accelZ); dataLog.print(",");
+    dataLog.print(velocity); dataLog.print(",");
     dataLog.print(temperature); dataLog.print(",");
     dataLog.print(pressure); dataLog.print(",");
     dataLog.print(altitude); dataLog.print(",");
+    dataLog.print(lastTheta); dataLog.print(",");
     dataLog.println(potValue);
+    dataLog.close();
   }
   else {
     Serial.print("Error: Unable to open "); Serial.println(dataFileName);
   }
+}
+
+void PrintHeader(){
+  File dataLog = SD.open(dataFileName, FILE_WRITE);
+  if(dataLog){
+    dataLog.print("Time"); dataLog.print(",");
+    dataLog.print("X Accel"); dataLog.print(",");
+    dataLog.print("Y Accel"); dataLog.print(",");
+    dataLog.print("Z Accel"); dataLog.print(",");
+    dataLog.print("Vertical Velocity"); dataLog.print(",");
+    dataLog.print("Temperature"); dataLog.print(",");
+    dataLog.print("Pressure"); dataLog.print(",");
+    dataLog.print("Altitude"); dataLog.print(",");
+    dataLog.print("Intended Position"); dataLog.print(",");
+    dataLog.println("Encoder Value");
+    dataLog.close();
+  }
+  else {
+    Serial.print("Error: Unable to open "); Serial.println(dataFileName);
+  }
+}
+
+bool Check_Jam(){
+  float realTheta = (potValue-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  if(fabs(realTheta-lastTheta) > servoJamThreshold)
+    return true;
+  else
+    return false;
 }
 
