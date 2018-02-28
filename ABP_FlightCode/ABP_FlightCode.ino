@@ -38,18 +38,18 @@ Servo tabServos;
 #define LANDED 4
 
 //Other useful constants
-const int chipSelect = 28; //Confirmed right number
+const int chipSelect = 28;
 const String dataFileName = "datalog.txt";
 const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 1887; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
 const int servoPin = 6;
-const int armPin = 7; //CHANGE THIS TO REAL PIN
-const int baroRegSize = 10; //Accuracy of regression varies wildly with number of points used
-const float seaPressure = 1013.25; //Update @ launch site
+const int armPin = 7;
+const int baroRegSize = 10; //Number of data points to use in linear regression
+const float seaPressure = 1013.25;
 const int potNoiseThreshold = 5; //Degrees
-const int maxPropDelay = 250; //Milliseconds
-const int sdWaitTime = 100;
+const int maxPropDelay = 250; //millis
+const int sdWaitTime = 67; //millis
 const float accelLiftoffThreshold = 50; //m/s^2
 const float baroLiftoffThreshold = 10; //m
 const float accelBurnoutThreshold = -10; //m/s^2
@@ -58,7 +58,8 @@ const float baroLandedThreshold = 40; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees. Note that the mechanism is such that thetaMin causes full extension and thetaMax causes full retraction.
 const float thetaFlush = 50;
-const float thetaMax = 70; 
+const float thetaMax = 70;
+const float thetaOffset = 20;
 const float maxStep = 10; //Degrees
 const float servoJamThreshold = 12; //Degrees, approx. two standard deviations
 
@@ -104,7 +105,8 @@ void setup() {
 
 void loop() {
   GetSensorData();
-  switch(flightState){
+  
+  switch(flightState){ //Main control section- runs commands and sets flags based on the current state, updates state where necessary
      case WAITING:
       RunButtonControl();
       if(armed){
@@ -159,25 +161,29 @@ void loop() {
     case LANDED:
     break;
   }
-  if(runPIDControl){
+  
+  //Run other subroutines based on the states of flags
+  if(runPIDControl){ 
     float error = CalcError(altitude, velocity, (int)(millis()-launchT)/10);
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    runPIDControl = !Check_Jam(); //Shut down the PID control loop if the servos are jammed
-    tabServos.write(theta+20);
+    tabServos.write(theta+thetaOffset); //Account for occasional servo slippage in testing by adding a constant offset
   }
   if(saveData){
-    if(millis()-lastSDT > sdWaitTime){
+    if(millis()-lastSDT > sdWaitTime){ //Only save data once every few cycles for the sake of processing speed
       SaveSensorData();
       lastSDT = millis();
     }
   }
   if(emergencyRescue)
     tabServos.write(thetaMin); //Fully deploy tabs if free fall is occurring
+
 }
 
-void ReadBestFlight(){
+
+//Functions:
+void ReadBestFlight(){ //Read in ideal velocity and altitude data
   File inFile = SD.open(inFileName);
   int c = 0; //Counter variable
   if(inFile){
@@ -193,7 +199,7 @@ void ReadBestFlight(){
   }
 }
 
-void UpdateBaroBuffers(){
+void UpdateBaroBuffers(){ //Cycle barometer buffer data for linear regression  purposes
   for(int c = 0; c < baroRegSize-1; c++){
     baroRegArr[c] = baroRegArr[c+1];
     timeRegArr[c] = timeRegArr[c+1];
@@ -202,7 +208,7 @@ void UpdateBaroBuffers(){
   timeRegArr[baroRegSize-1] = millis();
 }
 
-float CalcBaroVel(){
+float CalcBaroVel(){ //Calculate velocity based on stored barometric data
   float sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
   for(int c = 0; c < baroRegSize; c++){ //Calculate variance and covariance components; fill time buffer
     sumX += timeRegArr[c];
@@ -214,13 +220,14 @@ float CalcBaroVel(){
   return slope;
 }
 
-float CalcAccelVel(float lastVel){
+float CalcAccelVel(float lastVel){ //Perform numeric integration to calculate velocity based on acceleration data
   float newVel = lastVel + accelZ*(millis()-lastCalcT)/1000;
   lastCalcT = millis();
   return newVel;
 }
 
-float CalcError(float realAlt, float realVel, int startT){
+float CalcError(float realAlt, float realVel, int startT){ //First PID control function
+  //Looks up closest matching altitude point in the model data, and calculates error based on the corresponding model velocity
   bool match = false;
   
   if(startT > preCalcSize-1) //Limit starting point to the size of the array
@@ -246,7 +253,7 @@ float CalcError(float realAlt, float realVel, int startT){
   return (realVel - bestVel[c]); //Return difference in velocities at the given altitude point
 }
 
-float PID(float error, float lastE, float &iTerm, int deltaT){
+float PID(float error, float lastE, float &iTerm, int deltaT){ //Second PID control function; returns an output angle based on the error
   static float cP = 80; //P constant
   static float cI = 0; //I constant
   static float cD = 4; //D constant
@@ -273,7 +280,7 @@ float PID(float error, float lastE, float &iTerm, int deltaT){
   return thetaOut; //With all transformations complete, return the output angle
 }
 
-void GetSensorData(){
+void GetSensorData(){ //Read in data from all sensors
   potValue = analogRead(potPin); //Read potentiometer data
   sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
@@ -288,7 +295,7 @@ void GetSensorData(){
     maxA = altitude; //Also track maximum altitude
 }
 
-void SaveSensorData(){
+void SaveSensorData(){ //Save data from all sensors
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
     dataLog.print(millis()); dataLog.print(","); dataLog.flush();
@@ -304,7 +311,7 @@ void SaveSensorData(){
   }
 }
 
-void PrintHeader(){
+void PrintHeader(){ //Print a descriptive header to the SD datalog
   File dataLog = SD.open(dataFileName, FILE_WRITE);
   if(dataLog){
     dataLog.print("Time,"); dataLog.flush();
@@ -322,15 +329,15 @@ void PrintHeader(){
   }
 }
 
-bool Check_Jam(){
-  float realTheta = (potValue-330)/10.314; //Calibrate these constants before flight
+bool Check_Jam(){ //Check if the tabs are jammed
+  float realTheta = (potValue-330)/10.314; //Always calibrate these constants before flight
   if(fabs(realTheta-lastTheta) > servoJamThreshold)
     return true;
   else
     return false;
 }
 
-void RunButtonControl(){
+void RunButtonControl(){ //Button debouncing subroutine for arming / disarming the rocket
   float threshold = 0.8;
   for(int c=9; c>0; c--)
     buttonArray[c] = buttonArray[c-1];
