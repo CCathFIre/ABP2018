@@ -17,7 +17,7 @@ int rotation = 0;
 int extension = 90;
 int retraction = 20;
 int potPin = A1;
-float servoJamThreshold = 5;
+float servoJamThreshold = 12;
 
 void setup() {
   myservo.attach(6);  // attaches the servo on pin 9 to the servo object
@@ -28,36 +28,39 @@ void print_pos(int pos) {
 }
 
 void loop() {
-  myservo.write(90);
-  while(1);
+  //myservo.write(20);
+  //while(1);
   
-  for (pos = retraction; pos <= extension; pos += 5) { // goes from 0 degrees to 180 degrees
+  for (pos = retraction; pos <= extension; pos += 10) { // goes from 0 degrees to 180 degrees
     // in steps of 1 degree
     Serial.print(pos);
     myservo.write(pos);              // tell servo to go to position in variable 'pos'
     delay(60);                       // waits 15ms for the servo to reach the position
     rotation = analogRead(potPin);
-    Serial.print(","); Serial.println(rotation);
+    Serial.print(", "); Serial.println(rotation);
     Serial.println(Check_Jam());
+    Serial.println();
   }
 
   delay(1000);
   
-  for (pos = extension; pos >= retraction; pos -= 5) { // goes from 180 degrees to 0 degrees
+  for (pos = extension; pos >= retraction; pos -= 10) { // goes from 180 degrees to 0 degrees
     Serial.print(pos);
     myservo.write(pos);              // tell servo to go to position in variable 'pos'
     delay(60);                       // waits 15ms for the servo to reach the position
     rotation = analogRead(potPin);
-    Serial.print(","); Serial.println(rotation);
+    Serial.print(", "); Serial.println(rotation);
     Serial.println(Check_Jam());
+    Serial.println();
   }
 
   delay(1000);
 }
 
 bool Check_Jam(){
-  float realTheta = ((float)rotation-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
-  if(fabs(realTheta-pos-20) > servoJamThreshold)
+  float realTheta = ((float)rotation-330)/10.314; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  Serial.print(realTheta+retraction); Serial.print(", ");
+  if(fabs(pos-realTheta-retraction) > servoJamThreshold)
     return true;
   else
     return false;

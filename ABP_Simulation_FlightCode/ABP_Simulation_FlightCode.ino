@@ -46,7 +46,7 @@ const String inFileName = "BESTFL~1.TXT";
 const int preCalcSize = 1887; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
 const int servoPin = 6;
-const int armPin = 7; //CHANGE THIS TO REAL PIN
+const int armPin = 7;
 const int baroRegSize = 10; //Accuracy of regression varies wildly with number of points used
 const float seaPressure = 1013.25; //Update @ launch site
 const int potNoiseThreshold = 5; //Degrees
@@ -59,12 +59,14 @@ const float baroApogeeThreshold = 5; //m
 const float baroLandedThreshold = 5; //m
 const float accelFreefallThreshold = 30; //m/s^2
 const float thetaMin = 0; //Degrees
-const float thetaFlush = 75;
-const float thetaMax = 75;
+const float thetaFlush = 50;
+const float thetaMax = 70;
+const float thetaOffset = 20;
 const float maxStep = 10; //Degrees
-const float servoJamThreshold = 5; //Degrees, approx. two standard deviations
+const float servoJamThreshold = 12; //Degrees, approx. two standard deviations
 
 //Flags
+bool pushed = false;
 bool armed = false;
 bool saveData = true;
 bool runPIDControl = true;
@@ -81,9 +83,10 @@ float bestAlt[preCalcSize], bestVel[preCalcSize];
 float theta=thetaMax, velocity = 0, maxA = 0, lastTheta=theta;
 float integralTerm = 0, lastError = 0;
 float baroRegArr[baroRegSize], timeRegArr[baroRegSize];
+int buttonArray[10] = {0,0,0,0,0,0,0,0,0,0};
 
 //Simulation variables
-float realA=-32, realV=600, realY=1350;
+float realA=-32, realV=600, realY=1425;
 int t_init = 4000, lastT; //milliseconds
 
 void setup() {
@@ -135,11 +138,12 @@ void setup() {
 }
 
 void loop() {
-  delay(12);
+  delay(5);
   GetSensorData();
   switch(flightState){
     case WAITING:
-      if(digitalRead(armPin)){
+      RunButtonControl();
+      if(armed){
         flightState = ARMED;
         tabServos.write(thetaMin);
         delay(1000);
@@ -148,12 +152,14 @@ void loop() {
     break;
     case ARMED:
       UpdateBaroBuffers();
+      RunButtonControl();
       if(accelZ > accelLiftoffThreshold ||  (altitude-launchA) > baroLiftoffThreshold){
         flightState = LAUNCHED;
         launchT = millis();
         saveData = true;
       }
-      if(digitalRead(armPin)){
+      if(!armed){
+        Serial.println("Disarming");
         flightState = WAITING;
         tabServos.write(thetaFlush);
       }
@@ -170,6 +176,7 @@ void loop() {
     break;
     case BURNOUT:
       velocity = realV; //CalcAccelVel(velocity);
+      Serial.print("Are we jammed? "); Serial.println(Check_Jam());
       if(maxA > altitude + baroApogeeThreshold){
         flightState = APOGEE;
         runPIDControl = false;
@@ -193,19 +200,19 @@ void loop() {
   }
   if(runPIDControl){
     float error = CalcError(altitude, velocity, (int)(millis()-launchT)/10);
-    Serial.print("Error: "); Serial.println(error);
+    //Serial.print("Error: "); Serial.println(error);
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    tabServos.write(theta+20);
+    tabServos.write(theta+thetaOffset);
     //runPIDControl = !CheckJam(); //Fix this before using!!!!
     Serial.print("Set servo angle: "); Serial.println(theta);
   }
   if(saveData){
    if(millis()-lastSDT > sdWaitTime){
-      Serial.print("Saving data to SD card- ");
+      //Serial.print("Saving data to SD card- ");
       SaveSensorData();
-      Serial.println("saved data to SD card.");
+      //Serial.println("saved data to SD card.");
       lastSDT = millis();
     }
   }
@@ -278,7 +285,7 @@ float CalcError(float realAlt, float realVel, int startT){
     else if(below < test)
       c -= 1;
 
-    if(last_c == c)
+    if(last_c == c) //
       match = true;
   }
   //Serial.print("Matching altitude: "); Serial.print(bestAlt[c]); Serial.print(", Matching Velocity: "); Serial.println(bestVel[c]);
@@ -308,15 +315,17 @@ float PID(float error, float lastE, float &iTerm, int deltaT){
   if(thetaOut < lastTheta - maxStep)
     thetaOut = lastTheta - maxStep;
   lastTheta=thetaOut;
-  return thetaOut; //Since 75 degrees is actually full retraction, not full extension, the output had to be slightly modified
+  return thetaOut; //Since 70 degrees is actually full retraction, not full extension, the output had to be slightly modified
 }
 
 void GetSensorData(){
+  potValue = analogRead(potPin); //Read potentiometer data and map to a displacement angle
   float dT = 0.01;
   //lastT=millis();
-  float W_rocket=50; //pounds
+  float W_rocket=47.5; //pounds
   float C_rocket=0.3, C_tab=1.3, rho_i = 0.0765, A_rocket=0.3068;
-  float A_tab=0.0556*cos(theta*PI/(2*thetaMax)); //theta*90/75*PI/180
+  float realTheta = (potValue-330)/10.314;
+  float A_tab=0.0556*cos(realTheta*PI/(2*thetaMax)); //theta*90/thetaMax*PI/180
   accelX=0;accelY=0;
   float rho_real = rho_i*(1-0.1715*realY/5280);
 
@@ -330,8 +339,7 @@ void GetSensorData(){
   altitude=realY;
   accelZ=realA;
   
-  /*potValue = map(analogRead(potPin),0,1023,0,269); //Read potentiometer data and map to a displacement angle
-  sensors_event_t event; //Read accelerometer data
+  /*sensors_event_t event; //Read accelerometer data
   accel.getEvent(&event);
   accelX = event.acceleration.x;
   accelY = event.acceleration.y;
@@ -383,9 +391,30 @@ void PrintHeader(){
 }
 
 bool Check_Jam(){
-  float realTheta = (potValue-381.95)/8.75; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  float realTheta = (potValue-330)/10.314; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  Serial.print(realTheta); Serial.print(" ");
   if(fabs(realTheta-lastTheta) > servoJamThreshold)
     return true;
   else
     return false;
 }
+
+void RunButtonControl(){
+  float threshold = 0.8;
+  for(int c=9; c>0; c--)
+    buttonArray[c] = buttonArray[c-1];
+  buttonArray[0] = digitalRead(armPin);
+  float avg = 0;
+  for(int c=0; c<10; c++)
+    avg += buttonArray[c];
+   avg /= 10;
+  if(!pushed && avg > threshold){
+    armed = !armed;
+    pushed = true;
+  }
+  else if(avg <= threshold){
+    Serial.println("Ready for button input");
+    pushed = false;
+  }
+}
+
