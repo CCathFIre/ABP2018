@@ -13,9 +13,9 @@ Servo myservo;  // create servo object to control a servo
 // twelve servo objects can be created on most boards
 
 int pos = 0;    // variable to store the servo position
-int rotation = 0;
-int extension = 90;
-int retraction = 20;
+int rotation = 10;
+int extension = 80;
+int retraction = 0;
 int potPin = A1;
 float servoJamThreshold = 12;
 
@@ -28,7 +28,7 @@ void print_pos(int pos) {
 }
 
 void loop() {
-  //myservo.write(20);
+  //myservo.write(10);
   //while(1);
   
   for (pos = retraction; pos <= extension; pos += 10) { // goes from 0 degrees to 180 degrees
@@ -58,7 +58,7 @@ void loop() {
 }
 
 bool Check_Jam(){
-  float realTheta = ((float)rotation-330)/10.314; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
+  float realTheta = ((float)rotation)/12; //ALWAYS MAKE SURE TO CALIBRATE THIS!!!
   Serial.print(realTheta+retraction); Serial.print(", ");
   if(fabs(pos-realTheta-retraction) > servoJamThreshold)
     return true;

@@ -47,19 +47,18 @@ const int servoPin = 6;
 const int armPin = 7;
 const int baroRegSize = 10; //Number of data points to use in linear regression
 const float seaPressure = 1013.25;
-const int potNoiseThreshold = 5; //Degrees
-const int maxPropDelay = 250; //millis
-const int sdWaitTime = 67; //millis
+const int sdWaitTime = 70; //millis
 const float accelLiftoffThreshold = 50; //m/s^2
-const float baroLiftoffThreshold = 10; //m
-const float accelBurnoutThreshold = -10; //m/s^2
+const float baroLiftoffThreshold = 25; //m
+const float accelBurnoutThreshold = -5; //m/s^2
 const float baroApogeeThreshold = 5; //m
 const float baroLandedThreshold = 40; //m
-const float accelFreefallThreshold = 30; //m/s^2
+const float accelFreefallThreshold = 40; //m/s
+const float gravOffset = -10; //m/s^2, compensate for measured acceleration due to gravity
 const float thetaMin = 0; //Degrees. Note that the mechanism is such that thetaMin causes full extension and thetaMax causes full retraction.
-const float thetaFlush = 50;
+const float thetaFlush = 65;
 const float thetaMax = 70;
-const float thetaOffset = 20;
+const float thetaOff = 10;
 const float maxStep = 10; //Degrees
 const float servoJamThreshold = 12; //Degrees, approx. two standard deviations
 
@@ -93,7 +92,7 @@ void setup() {
   pinMode(armPin, INPUT);
 
   tabServos.attach(servoPin);
-  tabServos.write(thetaMax); //Fully retract drag tabs initially
+  tabServos.write(thetaMax+thetaOff); //Fully retract drag tabs initially
   
   accel.setRange(ADXL345_RANGE_16_G);
   altitude = bmp.readAltitude(seaPressure); //Set a baseline starting altitude
@@ -111,9 +110,17 @@ void loop() {
       RunButtonControl();
       if(armed){
         flightState = ARMED;
-        tabServos.write(thetaMin);
+        altitude = bmp.readAltitude(seaPressure); //Set a new baseline starting altitude
+        launchA = altitude;
+        File dataLog = SD.open(dataFileName, FILE_WRITE);
+        if(dataLog){
+          dataLog.print("Launch altitude: "); dataLog.flush();
+          dataLog.println(altitude); dataLog.flush();
+          dataLog.close();
+        }
+        tabServos.write(thetaMin+thetaOff);
         delay(1000);
-        tabServos.write(thetaFlush);
+        tabServos.write(thetaFlush+thetaOff);
       }
     break;
     case ARMED:
@@ -144,7 +151,7 @@ void loop() {
       if(maxA > altitude + baroApogeeThreshold){
         flightState = APOGEE;
         runPIDControl = false;
-        tabServos.write(thetaFlush);
+        tabServos.write(thetaFlush+thetaOff);
       }
     break;
     case APOGEE:
@@ -153,7 +160,7 @@ void loop() {
         emergencyRescue = true;
       if(fabs(altitude - launchA) <= baroLandedThreshold){
         flightState = LANDED;
-        tabServos.write(thetaMax);
+        tabServos.write(thetaMax+thetaOff);
         saveData = false;
         emergencyRescue = false;
       }
@@ -168,7 +175,7 @@ void loop() {
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
-    tabServos.write(theta+thetaOffset); //Account for occasional servo slippage in testing by adding a constant offset
+    tabServos.write(theta+thetaOff); //Account for occasional servo slippage in testing by adding a constant offset
   }
   if(saveData){
     if(millis()-lastSDT > sdWaitTime){ //Only save data once every few cycles for the sake of processing speed
@@ -177,7 +184,7 @@ void loop() {
     }
   }
   if(emergencyRescue)
-    tabServos.write(thetaMin); //Fully deploy tabs if free fall is occurring
+    tabServos.write(thetaMin+thetaOff); //Fully deploy tabs if free fall is occurring
 
 }
 
@@ -210,7 +217,7 @@ void UpdateBaroBuffers(){ //Cycle barometer buffer data for linear regression  p
 
 float CalcBaroVel(){ //Calculate velocity based on stored barometric data
   float sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
-  for(int c = 0; c < baroRegSize; c++){ //Calculate variance and covariance components; fill time buffer
+  for(int c = 0; c < baroRegSize; c++){ //Calculate variance and covariance components
     sumX += timeRegArr[c];
     sumY += baroRegArr[c];
     sumXX += pow(timeRegArr[c],2);
@@ -286,11 +293,11 @@ void GetSensorData(){ //Read in data from all sensors
   accel.getEvent(&event);
   accelX = event.acceleration.x;
   accelY = event.acceleration.y;
-  accelZ = event.acceleration.z;
-  temperature = bmp.readTemperature();
+  accelZ = event.acceleration.z + gravOffset;
+  temperature = bmp.readTemperature(); //Read barometer data
   pressure = bmp.readPressure();
   lastA = altitude; //Variable to track if new altitude data has come in
-  altitude = bmp.readAltitude(seaPressure)-launchA; //Shift all altitude data relative to the starting point
+  altitude = bmp.readAltitude(seaPressure);
   if(altitude > maxA)
     maxA = altitude; //Also track maximum altitude
 }
@@ -302,11 +309,14 @@ void SaveSensorData(){ //Save data from all sensors
     dataLog.print(accelX); dataLog.print(","); dataLog.flush();
     dataLog.print(accelY); dataLog.print(","); dataLog.flush();
     dataLog.print(accelZ); dataLog.print(","); dataLog.flush();
+    dataLog.print(velocity); dataLog.print(","); dataLog.flush();
     dataLog.print(temperature); dataLog.print(","); dataLog.flush();
     dataLog.print(pressure); dataLog.print(","); dataLog.flush();
     dataLog.print(altitude); dataLog.print(","); dataLog.flush();
+    dataLog.print(lastTheta); dataLog.print(","); dataLog.flush();
     dataLog.print(potValue);  dataLog.print(","); dataLog.flush();
-    dataLog.println(Check_Jam()); dataLog.flush();
+    dataLog.print(Check_Jam()); dataLog.print(","); dataLog.flush();
+    dataLog.println(flightState); dataLog.flush();
     dataLog.close();
   }
 }
@@ -324,13 +334,14 @@ void PrintHeader(){ //Print a descriptive header to the SD datalog
     dataLog.print("Altitude,"); dataLog.flush();
     dataLog.print("Intended Position,"); dataLog.flush();
     dataLog.print("Encoder Value,"); dataLog.flush();
-    dataLog.println("Jammed?"); dataLog.flush();
+    dataLog.print("Jammed?,"); dataLog.flush();
+    dataLog.println("Flight State"); dataLog.flush();
     dataLog.close();
   }
 }
 
 bool Check_Jam(){ //Check if the tabs are jammed
-  float realTheta = (potValue-330)/10.314; //Always calibrate these constants before flight
+  float realTheta = (potValue)/12; //Always calibrate these constants before flight!!
   if(fabs(realTheta-lastTheta) > servoJamThreshold)
     return true;
   else

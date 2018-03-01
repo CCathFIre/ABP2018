@@ -42,7 +42,7 @@ Servo tabServos;
 //Other useful constants that may need to be tweaked over time
 const int chipSelect = 28;
 const String dataFileName = "datalog.txt";
-const String inFileName = "BESTFL~1.TXT";
+const String inFileName = "BESTFL~1.TXT"; //Use "IMPFLI~1.TXT" for imperial units
 const int preCalcSize = 1887; //Number of data points in the pre-calculated ideal flight layout
 const int potPin = A1;
 const int servoPin = 6;
@@ -359,9 +359,11 @@ void SaveSensorData(){
     dataLog.print(accelX); dataLog.print(","); dataLog.flush();
     dataLog.print(accelY); dataLog.print(","); dataLog.flush();
     dataLog.print(accelZ); dataLog.print(","); dataLog.flush();
+    dataLog.print(velocity); dataLog.print(","); dataLog.flush();
     dataLog.print(temperature); dataLog.print(","); dataLog.flush();
     dataLog.print(pressure); dataLog.print(","); dataLog.flush();
     dataLog.print(altitude); dataLog.print(","); dataLog.flush();
+    dataLog.print(lastTheta); dataLog.print(","); dataLog.flush();
     dataLog.println(potValue); dataLog.flush();
     dataLog.close();
   }
