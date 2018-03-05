@@ -2,9 +2,9 @@
  * Notre Dame Rocket Team Air-Breaking Payload Flight Code Version 1.0
  * 
  * Authors: Aidan McDonald, Tommy Flanagan
- * Last Update: 02/27/2018
+ * Last Update: 3/5/2018
  * 
- * Update description: Incorporated bugfixes discovered in the ground testing code
+ * Update description: Post-test flight update
  * 
  * Completed Items:
  * Core flight-tracking switch case structure
@@ -56,7 +56,7 @@ const float baroLandedThreshold = 40; //m
 const float accelFreefallThreshold = 40; //m/s
 const float gravOffset = -10; //m/s^2, compensate for measured acceleration due to gravity
 const float thetaMin = 0; //Degrees. Note that the mechanism is such that thetaMin causes full extension and thetaMax causes full retraction.
-const float thetaFlush = 65;
+const float thetaFlush = 60;
 const float thetaMax = 70;
 const float thetaOff = 10;
 const float maxStep = 10; //Degrees
@@ -88,8 +88,9 @@ void setup() {
   {
     while(1);
   }
-  
+  Serial.println("Starting setup");
   pinMode(armPin, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   tabServos.attach(servoPin);
   tabServos.write(thetaMax+thetaOff); //Fully retract drag tabs initially
@@ -100,6 +101,7 @@ void setup() {
 
   ReadBestFlight();
   PrintHeader();
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void loop() {
@@ -121,6 +123,10 @@ void loop() {
         tabServos.write(thetaMin+thetaOff);
         delay(1000);
         tabServos.write(thetaFlush+thetaOff);
+        delay(500);
+        tabServos.write(thetaMin+thetaOff);
+        delay(1000);
+        tabServos.write(thetaFlush+thetaOff);
       }
     break;
     case ARMED:
@@ -133,7 +139,9 @@ void loop() {
       }
       if(!armed){
         flightState = WAITING;
-        tabServos.write(thetaMax);
+        tabServos.write(thetaMin+thetaOff);
+        delay(1000);
+        tabServos.write(thetaMax+thetaOff);
       }
     break;
     case LAUNCHED:
@@ -152,6 +160,12 @@ void loop() {
         flightState = APOGEE;
         runPIDControl = false;
         tabServos.write(thetaFlush+thetaOff);
+        File dataLog = SD.open(dataFileName, FILE_WRITE);
+        if(dataLog){
+          dataLog.print("Apogee: "); dataLog.flush();
+          dataLog.println(maxA); dataLog.flush();
+          dataLog.close();
+        }
       }
     break;
     case APOGEE:
@@ -171,7 +185,7 @@ void loop() {
   
   //Run other subroutines based on the states of flags
   if(runPIDControl){ 
-    float error = CalcError(altitude, velocity, (int)(millis()-launchT)/10);
+    float error = CalcError(altitude-launchA, velocity, (int)(millis()-launchT)/10);
     theta = PID(error, lastError, integralTerm, millis()-lastPIDT);
     lastError = error;
     lastPIDT = millis();
